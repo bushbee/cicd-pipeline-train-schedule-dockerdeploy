@@ -32,47 +32,36 @@ pipeline {
             }
         }
 
+   
         stage('DeployToProduction') {
-            steps {
-                script {
-                    sh '''
-                    docker ps -q --filter "name=train-schedule" | xargs -r docker stop
-                    docker ps -a -q --filter "name=train-schedule" | xargs -r docker rm
-                    docker pull bushbee/train-schedule:${BUILD_NUMBER}
-                    docker run -d --name train-schedule -p 80:80 bushbee/train-schedule:${BUILD_NUMBER}
-                    '''
-                }
+            when {
+                branch 'master'
             }
-        }
-    }
-    stage('DeployToProduction') {
-        when {
-            branch 'master'
-        }
-        steps {
-            input 'Deploy to Production'
-            milestone(1)
-            withCredentials([usernamePassword(credentialsId: 'webserver_login', usernameVariable: 'USERNAME', passwordVariable: 'USERPASS')]) {
-                script {
-                    def server = "${USERNAME}@${env.prod_ip}"
-                    def image = "bushbee/train-schedule:${env.BUILD_NUMBER}"
-    
-                    // Pull latest image
-                    sh "sshpass -p '$USERPASS' ssh -o StrictHostKeyChecking=no $server \"docker pull $image\""
-    
-                    // Stop and remove old container (ignore errors)
-                    def stopStatus = sh(script: "sshpass -p '$USERPASS' ssh -o StrictHostKeyChecking=no $server \"docker stop train-schedule\"", returnStatus: true)
-                    if (stopStatus != 0) {
-                        echo "Container not running or stop failed"
+            steps {
+                input 'Deploy to Production'
+                milestone(1)
+                withCredentials([usernamePassword(credentialsId: 'webserver_login', usernameVariable: 'USERNAME', passwordVariable: 'USERPASS')]) {
+                    script {
+                        def server = "${USERNAME}@${env.prod_ip}"
+                        def image = "bushbee/train-schedule:${env.BUILD_NUMBER}"
+        
+                        // Pull latest image
+                        sh "sshpass -p '$USERPASS' ssh -o StrictHostKeyChecking=no $server \"docker pull $image\""
+        
+                        // Stop and remove old container (ignore errors)
+                        def stopStatus = sh(script: "sshpass -p '$USERPASS' ssh -o StrictHostKeyChecking=no $server \"docker stop train-schedule\"", returnStatus: true)
+                        if (stopStatus != 0) {
+                            echo "Container not running or stop failed"
+                        }
+        
+                        def rmStatus = sh(script: "sshpass -p '$USERPASS' ssh -o StrictHostKeyChecking=no $server \"docker rm train-schedule\"", returnStatus: true)
+                        if (rmStatus != 0) {
+                            echo "Container removal failed or not found"
+                        }
+        
+                        // Run new container
+                        sh "sshpass -p '$USERPASS' ssh -o StrictHostKeyChecking=no $server \"docker run --restart always --name train-schedule -p 8080:8080 -d $image\""
                     }
-    
-                    def rmStatus = sh(script: "sshpass -p '$USERPASS' ssh -o StrictHostKeyChecking=no $server \"docker rm train-schedule\"", returnStatus: true)
-                    if (rmStatus != 0) {
-                        echo "Container removal failed or not found"
-                    }
-    
-                    // Run new container
-                    sh "sshpass -p '$USERPASS' ssh -o StrictHostKeyChecking=no $server \"docker run --restart always --name train-schedule -p 8080:8080 -d $image\""
                 }
             }
         }
